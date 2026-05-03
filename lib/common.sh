@@ -13,7 +13,7 @@ _WG_COMMON_SOURCED=1
 # ------------------------------------------------------------------------------
 # Constants
 # ------------------------------------------------------------------------------
-SCRIPT_VERSION="${SCRIPT_VERSION:-1.0.3}"
+SCRIPT_VERSION="${SCRIPT_VERSION:-1.0.4}"
 LOG_FILE="${LOG_FILE:-/var/log/wg-tunnel-setup.log}"
 WG_DIR="${WG_DIR:-/etc/wireguard}"
 WG_IF="${WG_IF:-wg0}"
@@ -126,23 +126,34 @@ banner() {
 }
 
 # pause <prompt>
-# Wait for user to press ENTER. Reads from /dev/tty so it works under
-# `curl … | sudo bash`.
+# Wait for user to press ENTER. Same source-selection strategy as read_tty:
+# stdin first if it's a TTY, /dev/tty as fallback for curl|bash mode.
 pause() {
     local prompt="${1:-Нажмите ENTER чтобы продолжить...}"
     local _unused
-    if [[ -r /dev/tty ]]; then
+    if [[ -t 0 ]]; then
         # shellcheck disable=SC2034  # _unused intentionally discarded
-        IFS= read -r -p "$prompt" _unused </dev/tty || true
-    else
-        # shellcheck disable=SC2034
         IFS= read -r -p "$prompt" _unused || true
+    elif [[ -r /dev/tty ]]; then
+        # shellcheck disable=SC2034
+        IFS= read -r -p "$prompt" _unused </dev/tty || true
     fi
 }
 
 # read_tty <varname> <prompt> [<timeout-seconds>]
-# Read a single line from /dev/tty (so it works in `curl|bash`) into the named
-# variable. Defaults to a 600-second timeout.
+# Read a single line of user input into the named variable.
+#
+# Source-selection strategy (the order matters):
+#   1. stdin, if stdin is a TTY. Under `sudo bash setup.sh` (the normal
+#      case) sudo wires the script's stdin straight to the user's pty,
+#      so reading from stdin is the most direct path. Some hosting
+#      environments expose two layers of pty and `/dev/tty` resolves to
+#      the *outer* one — reading from there returns nothing while the
+#      user types into the inner one. Preferring stdin avoids that trap.
+#   2. /dev/tty, if readable. Covers `curl ... | sudo bash` where
+#      stdin is the pipe from curl and we explicitly need the
+#      controlling terminal.
+#   3. give up with a hint about env-var bypass.
 #
 # Sanitizes the input before returning:
 #   * strips ANSI CSI escape sequences (ESC [ ... <final-byte>) — covers
@@ -151,16 +162,45 @@ pause() {
 #     doesn't filter these so they end up as literal bytes in the variable.
 #   * strips lone ESC bytes that aren't part of a CSI sequence
 #   * strips CR (Windows-clipboard pastes that include CRLF line endings)
+#
+# Always logs read-source context to $LOG_FILE for triage when input
+# doesn't come through as expected.
 read_tty() {
     local _varname="$1"
     local _prompt="$2"
     local _timeout="${3:-600}"
     local _value=""
-    local _src="/dev/tty"
-    [[ -r "$_src" ]] || _src="/dev/stdin"
-    if ! IFS= read -r -t "$_timeout" -p "$_prompt" _value <"$_src"; then
-        die "Превышен таймаут ввода (${_timeout}с)."
+    local _src_label=""
+    local _rc=0
+
+    # One-shot context log so we can see what the script is reading from.
+    {
+        printf '%s [READ] prompt=%q stdin_isatty=%s fd0=%s\n' \
+            "$(date '+%T%z')" "$_prompt" \
+            "$([[ -t 0 ]] && echo yes || echo no)" \
+            "$(readlink /proc/self/fd/0 2>/dev/null || echo ?)"
+    } >>"$LOG_FILE" 2>/dev/null || true
+
+    if [[ -t 0 ]]; then
+        _src_label="stdin"
+        IFS= read -r -t "$_timeout" -p "$_prompt" _value || _rc=$?
+    elif [[ -r /dev/tty ]]; then
+        _src_label="/dev/tty"
+        IFS= read -r -t "$_timeout" -p "$_prompt" _value </dev/tty || _rc=$?
+    else
+        die "Не найден TTY для ввода. Используйте env-переменные (см. README → Non-interactive)."
     fi
+
+    {
+        printf '%s [READ] src=%s rc=%d raw_len=%d\n' \
+            "$(date '+%T%z')" "$_src_label" "$_rc" "${#_value}"
+    } >>"$LOG_FILE" 2>/dev/null || true
+
+    if (( _rc != 0 )); then
+        # bash read returns 1 on timeout (-t) or EOF.
+        die "Чтение прервано (src=${_src_label}, rc=${_rc}, raw bytes=${#_value}, timeout=${_timeout}с)."
+    fi
+
     # CSI per ECMA-48: ESC '[' params (0x30-0x3F) intermediates (0x20-0x2F)
     # final-byte (0x40-0x7E). The sed expression matches that grammar.
     _value="$(LC_ALL=C sed -e $'s/\x1b\\[[0-?]*[ -\\/]*[@-~]//g' \
