@@ -23,6 +23,7 @@ ingress_run() {
         printf '\n'
         printf '  Внешний IP:        %s\n' "$public_ip"
         printf '  Внешний интерфейс: %s\n' "$iface"
+        # shellcheck disable=SC2153  # WG_INGRESS_IP defined in common.sh
         printf '  Туннельный IP:     %s/24\n' "$WG_INGRESS_IP"
         printf '  Endpoint (egress): будет запрошен ниже\n'
         printf '\n'
@@ -54,10 +55,29 @@ ingress_run() {
         printf '(на egress выберите роль 1), скопируйте оттуда EGRESS PUBLIC\n'
         printf 'KEY и PRESHARED KEY и вернитесь сюда.\n\n'
     }
+    # Non-interactive bypass: each of the three values can be supplied via
+    # environment variables. Useful when the user's terminal mangles paste
+    # in a way the sanitizer can't catch — write the keys to a file and
+    # source them, or pass with `WG_EGRESS_PUB=… sudo -E bash setup.sh`.
     local egress_pub egress_ip psk
-    prompt_wg_key egress_pub "EGRESS PUBLIC KEY:     "
-    prompt_ipv4   egress_ip  "EGRESS IP (публичный): "
-    prompt_wg_key psk        "PRESHARED KEY:         "
+    if [[ -n "${WG_EGRESS_PUB:-}" ]] && is_valid_wg_key "${WG_EGRESS_PUB}"; then
+        egress_pub="${WG_EGRESS_PUB}"
+        log_info "EGRESS PUBLIC KEY взят из WG_EGRESS_PUB"
+    else
+        prompt_wg_key egress_pub "EGRESS PUBLIC KEY:     "
+    fi
+    if [[ -n "${WG_EGRESS_IP:-}" ]] && is_valid_ipv4 "${WG_EGRESS_IP}"; then
+        egress_ip="${WG_EGRESS_IP}"
+        log_info "EGRESS IP взят из WG_EGRESS_IP"
+    else
+        prompt_ipv4 egress_ip "EGRESS IP (публичный): "
+    fi
+    if [[ -n "${WG_PSK:-}" ]] && is_valid_wg_key "${WG_PSK}"; then
+        psk="${WG_PSK}"
+        log_info "PRESHARED KEY взят из WG_PSK"
+    else
+        prompt_wg_key psk "PRESHARED KEY:         "
+    fi
 
     # Persist PSK for completeness; wg0.conf already contains it inline.
     umask_secure

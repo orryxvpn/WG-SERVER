@@ -14,7 +14,7 @@ set -euo pipefail
 # ------------------------------------------------------------------------------
 # Constants — keep these in sync with lib/common.sh.
 # ------------------------------------------------------------------------------
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.3"
 REPO_SLUG="${WG_REPO_SLUG:-orryxvpn/wg-server}"
 REPO_REF="${WG_REPO_REF:-v${SCRIPT_VERSION}}"
 LIB_FILES=("common.sh" "checks.sh" "prompts.sh" "egress.sh" "ingress.sh")
