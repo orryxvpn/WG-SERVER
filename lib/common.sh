@@ -144,11 +144,13 @@ pause() {
 # Read a single line from /dev/tty (so it works in `curl|bash`) into the named
 # variable. Defaults to a 600-second timeout.
 #
-# Strips bracketed-paste markers and stray CRs from the result. Many modern
-# terminals (xterm, gnome-terminal, kitty, ...) wrap pasted text in
-# ESC[200~ ... ESC[201~. `read` (unlike readline) doesn't filter these, so
-# they end up as literal bytes in the variable — invisible on screen but
-# breaking strict input validation (e.g. WG keys).
+# Sanitizes the input before returning:
+#   * strips ANSI CSI escape sequences (ESC [ ... <final-byte>) — covers
+#     bracketed-paste markers ESC[200~ / ESC[201~, mode toggles ESC[?2004h
+#     and ESC[?2004l, cursor commands, etc. `bash read` (unlike readline)
+#     doesn't filter these so they end up as literal bytes in the variable.
+#   * strips lone ESC bytes that aren't part of a CSI sequence
+#   * strips CR (Windows-clipboard pastes that include CRLF line endings)
 read_tty() {
     local _varname="$1"
     local _prompt="$2"
@@ -159,10 +161,11 @@ read_tty() {
     if ! IFS= read -r -t "$_timeout" -p "$_prompt" _value <"$_src"; then
         die "Превышен таймаут ввода (${_timeout}с)."
     fi
-    # Strip bracketed-paste markers and CRs.
-    _value="${_value//$'\x1b[200~'/}"
-    _value="${_value//$'\x1b[201~'/}"
-    _value="${_value//$'\r'/}"
+    # CSI per ECMA-48: ESC '[' params (0x30-0x3F) intermediates (0x20-0x2F)
+    # final-byte (0x40-0x7E). The sed expression matches that grammar.
+    _value="$(LC_ALL=C sed -e $'s/\x1b\\[[0-?]*[ -\\/]*[@-~]//g' \
+                          -e $'s/\x1b//g' \
+                          -e $'s/\r//g' <<<"$_value")"
     printf -v "$_varname" '%s' "$_value"
 }
 
