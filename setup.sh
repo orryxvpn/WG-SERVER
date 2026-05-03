@@ -14,10 +14,16 @@ set -euo pipefail
 # ------------------------------------------------------------------------------
 # Constants — keep these in sync with lib/common.sh.
 # ------------------------------------------------------------------------------
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.0.2"
 REPO_SLUG="${WG_REPO_SLUG:-orryxvpn/wg-server}"
 REPO_REF="${WG_REPO_REF:-v${SCRIPT_VERSION}}"
 LIB_FILES=("common.sh" "checks.sh" "prompts.sh" "egress.sh" "ingress.sh")
+# Set by load_libs after we know whether we're using a local checkout
+# or a downloaded copy. Surfaced in the role-selection banner (in
+# lib/prompts.sh) so the user can see at a glance which build they
+# are running.
+# shellcheck disable=SC2034  # consumed by lib/prompts.sh prompt_role
+WG_SOURCE_INFO=""
 
 LOG_FILE="${LOG_FILE:-/var/log/wg-tunnel-setup.log}"
 LIB_DIR=""        # set by load_libs
@@ -70,6 +76,11 @@ load_libs() {
     if [[ -z "$LIB_DIR" ]]; then
         _bootstrap_download_libs
         LIB_DIR="$TMP_LIB_DIR"
+        # shellcheck disable=SC2034  # read by lib/prompts.sh prompt_role
+        WG_SOURCE_INFO="downloaded from ref=${REPO_REF}"
+    else
+        # shellcheck disable=SC2034  # read by lib/prompts.sh prompt_role
+        WG_SOURCE_INFO="local: ${LIB_DIR}"
     fi
 
     local f
@@ -135,6 +146,15 @@ _on_exit() {
 # Main
 # ------------------------------------------------------------------------------
 main() {
+    # Handle --version / -V before any side effects so users can quickly
+    # check which build they're about to run.
+    case "${1:-}" in
+        -V|--version)
+            printf 'wg-tunnel-setup %s\n' "$SCRIPT_VERSION"
+            exit 0
+            ;;
+    esac
+
     load_libs
     log_init
     _log_to_file "INFO" "=== wg-tunnel-setup v${SCRIPT_VERSION} starting ==="

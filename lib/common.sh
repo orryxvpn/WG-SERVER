@@ -13,7 +13,7 @@ _WG_COMMON_SOURCED=1
 # ------------------------------------------------------------------------------
 # Constants
 # ------------------------------------------------------------------------------
-SCRIPT_VERSION="${SCRIPT_VERSION:-1.0.0}"
+SCRIPT_VERSION="${SCRIPT_VERSION:-1.0.2}"
 LOG_FILE="${LOG_FILE:-/var/log/wg-tunnel-setup.log}"
 WG_DIR="${WG_DIR:-/etc/wireguard}"
 WG_IF="${WG_IF:-wg0}"
