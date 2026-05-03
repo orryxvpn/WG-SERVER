@@ -53,6 +53,29 @@ prompt_role() {
     done
 }
 
+# _diag_dump_bytes <label> <value>
+# Hexdump the given value to stderr (visible to the user) AND to the log.
+# Used when input validation fails so we can see exactly which bytes the
+# terminal/SSH stack is delivering. The dump is bounded to keep output sane
+# on very large pastes.
+_diag_dump_bytes() {
+    local label="$1"
+    local value="$2"
+    local len="${#value}"
+    {
+        printf '%s[DIAG]%s %s: %d bytes\n' "$C_YELLOW" "$C_RESET" "$label" "$len"
+        printf '%s' "$value" | head -c 256 \
+            | od -An -tx1z -w32 | sed 's/^/    /'
+        if (( len > 256 )); then
+            printf '    ... (truncated to 256 bytes)\n'
+        fi
+    } >&2
+    _log_to_file "DIAG" "${label}: len=${len}"
+    {
+        printf '%s' "$value" | head -c 256 | od -An -tx1 -w32
+    } >>"$LOG_FILE" 2>/dev/null || true
+}
+
 # prompt_wg_key <varname> <prompt>
 # Read a WireGuard key from the user with retry-on-invalid.
 #
@@ -60,13 +83,20 @@ prompt_role() {
 # (base64 + '='). This is a deliberate belt-and-suspenders defense — pasting
 # in a terminal can introduce many invisible bytes (bracketed-paste markers,
 # the bracketed-paste-mode toggle ESC[?2004h/l, NBSP from web copies, CR from
-# Windows clipboards, ...). Stripping the alphabet leaves only the key.
+# Windows clipboards, UTF-8 lookalike characters, ...). Stripping the alphabet
+# leaves only the key.
+#
+# On validation failure prints a hex dump of the raw bytes to stderr so the
+# user can see exactly what their terminal sent. The same dump goes to the
+# log file (root-owned, mode 600).
 prompt_wg_key() {
     local _varname="$1"
     local _prompt="$2"
     local _value=""
     local _clean=""
+    local _attempt=0
     while true; do
+        _attempt=$((_attempt + 1))
         read_tty _value "$_prompt"
         _clean="$(LC_ALL=C tr -cd 'A-Za-z0-9+/=' <<<"$_value")"
         if is_valid_wg_key "$_clean"; then
@@ -74,6 +104,9 @@ prompt_wg_key() {
             return 0
         fi
         log_warn "Это не похоже на корректный WireGuard-ключ (нужно 44 base64-символа, заканчивается на '=')."
+        _diag_dump_bytes "raw input (attempt #${_attempt})" "$_value"
+        log_warn "После очистки осталось ${#_clean} байт: '${_clean}'"
+        log_warn "Если паста повторяется ломаной, попробуйте: вставить ключ в файл и запустить с переменной (см. README раздел Non-interactive)."
     done
 }
 
@@ -85,7 +118,9 @@ prompt_ipv4() {
     local _prompt="$2"
     local _value=""
     local _clean=""
+    local _attempt=0
     while true; do
+        _attempt=$((_attempt + 1))
         read_tty _value "$_prompt"
         _clean="$(LC_ALL=C tr -cd '0-9.' <<<"$_value")"
         if is_valid_ipv4 "$_clean"; then
@@ -93,6 +128,7 @@ prompt_ipv4() {
             return 0
         fi
         log_warn "Это не похоже на IPv4-адрес. Пример: 198.51.100.7"
+        _diag_dump_bytes "raw input (attempt #${_attempt})" "$_value"
     done
 }
 

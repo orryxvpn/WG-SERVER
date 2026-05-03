@@ -50,14 +50,19 @@ egress_run() {
     egress_show_keys "$egress_pub" "$psk"
 
     local ingress_pub=""
-    {
-        printf '\n'
-        banner "ШАГ 2 ИЗ 2: ввод ключа от INGRESS"
-        printf '\n'
-        printf 'Запустите скрипт на INGRESS-сервере (выберите роль 2),\n'
-        printf 'дождитесь там вывода INGRESS PUBLIC KEY и вставьте его сюда.\n\n'
-    }
-    prompt_wg_key ingress_pub "INGRESS PUBLIC KEY: "
+    if [[ -n "${WG_INGRESS_PUB:-}" ]] && is_valid_wg_key "${WG_INGRESS_PUB}"; then
+        ingress_pub="${WG_INGRESS_PUB}"
+        log_info "INGRESS PUBLIC KEY взят из WG_INGRESS_PUB"
+    else
+        {
+            printf '\n'
+            banner "ШАГ 2 ИЗ 2: ввод ключа от INGRESS"
+            printf '\n'
+            printf 'Запустите скрипт на INGRESS-сервере (выберите роль 2),\n'
+            printf 'дождитесь там вывода INGRESS PUBLIC KEY и вставьте его сюда.\n\n'
+        }
+        prompt_wg_key ingress_pub "INGRESS PUBLIC KEY: "
+    fi
 
     log_step "Запись /etc/wireguard/wg0.conf"
     egress_write_config "$iface" "$egress_priv" "$ingress_pub" "$psk"
