@@ -143,6 +143,12 @@ pause() {
 # read_tty <varname> <prompt> [<timeout-seconds>]
 # Read a single line from /dev/tty (so it works in `curl|bash`) into the named
 # variable. Defaults to a 600-second timeout.
+#
+# Strips bracketed-paste markers and stray CRs from the result. Many modern
+# terminals (xterm, gnome-terminal, kitty, ...) wrap pasted text in
+# ESC[200~ ... ESC[201~. `read` (unlike readline) doesn't filter these, so
+# they end up as literal bytes in the variable — invisible on screen but
+# breaking strict input validation (e.g. WG keys).
 read_tty() {
     local _varname="$1"
     local _prompt="$2"
@@ -153,6 +159,10 @@ read_tty() {
     if ! IFS= read -r -t "$_timeout" -p "$_prompt" _value <"$_src"; then
         die "Превышен таймаут ввода (${_timeout}с)."
     fi
+    # Strip bracketed-paste markers and CRs.
+    _value="${_value//$'\x1b[200~'/}"
+    _value="${_value//$'\x1b[201~'/}"
+    _value="${_value//$'\r'/}"
     printf -v "$_varname" '%s' "$_value"
 }
 
