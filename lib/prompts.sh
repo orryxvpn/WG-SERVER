@@ -22,7 +22,12 @@ prompt_role() {
         printf '\n'
         printf 'Этот скрипт настраивает один из двух серверов для схемы\n'
         printf 'RU-Reality-туннель → внешний выходной сервер.\n\n'
-        printf 'Текущий сервер:\n'
+        printf 'Скрипт:\n'
+        printf '  Версия:          %s%s%s\n' "$C_BOLD" "$SCRIPT_VERSION" "$C_RESET"
+        if [[ -n "${WG_SOURCE_INFO:-}" ]]; then
+            printf '  Источник:        %s\n' "$WG_SOURCE_INFO"
+        fi
+        printf '\nТекущий сервер:\n'
         printf '  Hostname:        %s\n' "$hostname"
         printf '  Public IPv4:     %s\n' "$public_ip"
         printf '  Default iface:   %s\n' "$iface"
