@@ -49,16 +49,23 @@ prompt_role() {
 }
 
 # prompt_wg_key <varname> <prompt>
-# Read a WireGuard key from the user with retry-on-invalid. Trims whitespace.
+# Read a WireGuard key from the user with retry-on-invalid.
+#
+# Sanitizes the raw input by stripping every byte outside the WG key alphabet
+# (base64 + '='). This is a deliberate belt-and-suspenders defense — pasting
+# in a terminal can introduce many invisible bytes (bracketed-paste markers,
+# the bracketed-paste-mode toggle ESC[?2004h/l, NBSP from web copies, CR from
+# Windows clipboards, ...). Stripping the alphabet leaves only the key.
 prompt_wg_key() {
     local _varname="$1"
     local _prompt="$2"
     local _value=""
+    local _clean=""
     while true; do
         read_tty _value "$_prompt"
-        _value="$(trim "$_value")"
-        if is_valid_wg_key "$_value"; then
-            printf -v "$_varname" '%s' "$_value"
+        _clean="$(LC_ALL=C tr -cd 'A-Za-z0-9+/=' <<<"$_value")"
+        if is_valid_wg_key "$_clean"; then
+            printf -v "$_varname" '%s' "$_clean"
             return 0
         fi
         log_warn "Это не похоже на корректный WireGuard-ключ (нужно 44 base64-символа, заканчивается на '=')."
@@ -66,15 +73,18 @@ prompt_wg_key() {
 }
 
 # prompt_ipv4 <varname> <prompt>
+# Same sanitization principle as prompt_wg_key: strip everything outside the
+# IPv4 dotted-decimal alphabet before validating.
 prompt_ipv4() {
     local _varname="$1"
     local _prompt="$2"
     local _value=""
+    local _clean=""
     while true; do
         read_tty _value "$_prompt"
-        _value="$(trim "$_value")"
-        if is_valid_ipv4 "$_value"; then
-            printf -v "$_varname" '%s' "$_value"
+        _clean="$(LC_ALL=C tr -cd '0-9.' <<<"$_value")"
+        if is_valid_ipv4 "$_clean"; then
+            printf -v "$_varname" '%s' "$_clean"
             return 0
         fi
         log_warn "Это не похоже на IPv4-адрес. Пример: 198.51.100.7"
