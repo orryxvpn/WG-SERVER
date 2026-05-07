@@ -8,8 +8,79 @@ if [[ -n "${_WG_PROMPTS_SOURCED:-}" ]]; then
 fi
 _WG_PROMPTS_SOURCED=1
 
-# prompt_role — show the main menu and echo the chosen role to stdout.
-# Possible values: egress | ingress | uninstall | quit
+# prompt_protocol — show protocol picker. Echoes one of:
+#   wg | hy2 | vless | uninstall | quit
+prompt_protocol() {
+    local public_ip="${1:-?}"
+    local iface="${2:-?}"
+    local hostname="${3:-?}"
+    local os="${4:-?}"
+    {
+        printf '\n'
+        banner "WireGuard Tunnel Setup v${SCRIPT_VERSION}" \
+               "Выбор транспортного протокола"
+        printf '\n'
+        printf 'Скрипт:\n'
+        printf '  Версия:          %s%s%s\n' "$C_BOLD" "$SCRIPT_VERSION" "$C_RESET"
+        if [[ -n "${WG_SOURCE_INFO:-}" ]]; then
+            printf '  Источник:        %s\n' "$WG_SOURCE_INFO"
+        fi
+        printf '\nТекущий сервер:\n'
+        printf '  Hostname:        %s\n' "$hostname"
+        printf '  Public IPv4:     %s\n' "$public_ip"
+        printf '  Default iface:   %s\n' "$iface"
+        printf '  OS:              %s\n' "$os"
+        printf '\nПротокол транспорта (один и тот же на обоих серверах):\n'
+        printf '  1) WireGuard            — kernel-tunnel, UDP %s, простой и быстрый\n' "${WG_PORT}"
+        printf '  2) Hysteria 2           — UDP/QUIC, sing-box+TUN, очень быстрый\n'
+        printf '  3) VLESS+Reality+Vision — TCP/TLS, sing-box+TUN, max stealth (как HTTPS)\n'
+        printf '  4) Удалить установку (uninstall)\n'
+        printf '  5) Выход\n\n'
+    } >&2
+    local choice=""
+    while true; do
+        read_tty choice "Ваш выбор [1-5]: "
+        choice="$(trim "$choice")"
+        case "$choice" in
+            1) printf 'wg';        return 0 ;;
+            2) printf 'hy2';       return 0 ;;
+            3) printf 'vless';     return 0 ;;
+            4) printf 'uninstall'; return 0 ;;
+            5) printf 'quit';      return 0 ;;
+            *) printf 'Неверный выбор. Введите число от 1 до 5.\n' >&2 ;;
+        esac
+    done
+}
+
+# prompt_role_only <protocol_label>
+# Two-option role picker (egress / ingress / back) used after the protocol has
+# already been chosen. Echoes "egress" | "ingress" | "back".
+prompt_role_only() {
+    local label="$1"
+    {
+        printf '\n'
+        banner "${label} — выбор роли"
+        printf '\n'
+        printf 'Какую роль настроить на этом сервере?\n'
+        printf '  1) EGRESS  (внешний, выходной)\n'
+        printf '  2) INGRESS (RU, точка входа)\n'
+        printf '  3) Назад\n\n'
+    } >&2
+    local choice=""
+    while true; do
+        read_tty choice "Ваш выбор [1-3]: "
+        choice="$(trim "$choice")"
+        case "$choice" in
+            1) printf 'egress';  return 0 ;;
+            2) printf 'ingress'; return 0 ;;
+            3) printf 'back';    return 0 ;;
+            *) printf 'Неверный выбор.\n' >&2 ;;
+        esac
+    done
+}
+
+# prompt_role — legacy single-screen menu kept for the WG flow that the
+# original script used. Possible values: egress | ingress | uninstall | quit
 prompt_role() {
     local public_ip="${1:-?}"
     local iface="${2:-?}"

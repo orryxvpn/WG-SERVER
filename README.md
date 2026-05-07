@@ -1,9 +1,18 @@
 # wg-tunnel-setup
 
-Автоматизированная установка WireGuard-туннеля для схемы
-**INGRESS (RU) → EGRESS (внешний выход)**: один интерактивный bash-скрипт,
-который запускается на обоих серверах и собирает всю настройку через
-copy-paste пары ключей.
+Автоматизированная установка туннеля **INGRESS (RU) → EGRESS** одним
+интерактивным bash-скриптом. С версии **1.1.0** поддерживаются три
+транспортных протокола на выбор:
+
+| Протокол                | Транспорт | Движок    | Когда выбрать                                    |
+| ----------------------- | --------- | --------- | ------------------------------------------------ |
+| **WireGuard**           | UDP       | kernel    | простой, быстрый, минимум зависимостей           |
+| **Hysteria 2**          | UDP/QUIC  | sing-box  | быстрее всего на потерях/высоком RTT, FEC, BBR   |
+| **VLESS+Reality+Vision**| TCP/TLS   | sing-box  | max stealth — снаружи неотличим от обычного HTTPS|
+
+Все три варианта дают одинаковый результат: на INGRESS поднимается
+туннельный интерфейс (`wg0` для WG, `singtun0` для HY2/VLESS), и трафик
+с **`fwmark 0x1`** уходит через него; всё остальное идёт обычным маршрутом.
 
 ```
    клиент (мобильник, ноут)
@@ -104,19 +113,52 @@ sudo bash setup.sh
 Скрипт на ingress продолжит и прогонит проверки. Если все прошли —
 готово.
 
+### Hysteria 2 — установка
+
+На EGRESS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/orryxvpn/wg-server/main/setup.sh -o setup.sh
+sudo WG_REPO_REF=main bash setup.sh
+# В меню: 2) Hysteria 2 → 1) EGRESS
+# Скрипт покажет HY2_BUNDLE — одну base64-строку.
+```
+
+На INGRESS (paste — одной переменной, без интерактивных prompt'ов):
+
+```bash
+sudo -E HY2_BUNDLE='<тот самый base64-блок>' WG_REPO_REF=main bash setup.sh
+# В меню: 2) Hysteria 2 → 2) INGRESS
+```
+
+Скрипт сам распакует `HY2_BUNDLE`, поставит sing-box, поднимет TUN
+`singtun0`, добавит `ip rule fwmark 0x1 → table sbox` и прогонит
+финальные проверки (включая `curl --interface singtun0 ifconfig.me`).
+
+### VLESS+Reality+Vision — установка
+
+Симметрично:
+
+```bash
+# EGRESS:
+sudo bash setup.sh         # 3) VLESS+Reality → 1) EGRESS, копируем VLESS_BUNDLE
+# INGRESS:
+sudo -E VLESS_BUNDLE='<base64-блок>' bash setup.sh   # 3) VLESS+Reality → 2) INGRESS
+```
+
 ### Альтернативный one-liner
 
 Если вы доверяете тегу и не хотите проверять файл:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/orryxvpn/wg-server/v1.0.0/setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/orryxvpn/wg-server/v1.1.0/setup.sh | sudo bash
 ```
 
 В этом режиме скрипт сам докачает `lib/*.sh` из того же тега во временную
 директорию и удалит её после завершения.
 
 > **Не используйте `main`-ветку в production-инструкциях.** Всегда
-> закрепляйтесь на теге (`v1.0.0`).
+> закрепляйтесь на теге (`v1.1.0`).
 
 ## Проверка после установки
 
@@ -225,33 +267,51 @@ ss -ulnp | grep 51820
 
 ## Non-interactive (через env-переменные)
 
-Если paste в твоём терминале ломает ключ так, что санитайзер не справляется
-(см. troubleshooting ниже), либо ты хочешь раскатывать через ansible/cloud-init,
-ключи можно передать через переменные окружения. Скрипт пропустит prompt
-для каждого значения, которое уже задано и проходит валидацию.
+Если paste в твоём терминале ломает ключ так, что санитайзер не справляется,
+либо ты раскатываешь через ansible/cloud-init, всё передаётся через
+переменные окружения.
 
-На INGRESS:
+### WireGuard
+
+| Переменная        | Кем читается | Что                          |
+| ----------------- | ------------ | ---------------------------- |
+| `WG_EGRESS_PUB`   | INGRESS      | публичный ключ EGRESS        |
+| `WG_EGRESS_IP`    | INGRESS      | публичный IPv4 EGRESS        |
+| `WG_PSK`          | INGRESS      | preshared key                |
+| `WG_INGRESS_PUB`  | EGRESS       | публичный ключ INGRESS       |
 
 ```bash
-sudo \
-  WG_EGRESS_PUB='abc123XYZ...=' \
-  WG_EGRESS_IP='1.2.3.4' \
-  WG_PSK='def456ABC...=' \
-  WG_REPO_REF=main \
+sudo -E \
+  WG_EGRESS_PUB='abc...=' WG_EGRESS_IP='1.2.3.4' WG_PSK='def...=' \
   bash setup.sh
 ```
 
-На EGRESS (после того как INGRESS показал свой публичный ключ):
+### Hysteria 2 (одна переменная-бандл)
 
-```bash
-sudo \
-  WG_INGRESS_PUB='xyz789QWE...=' \
-  WG_REPO_REF=main \
-  bash setup.sh
-```
+| Переменная     | Кем читается | Что                                                   |
+| -------------- | ------------ | ----------------------------------------------------- |
+| `HY2_BUNDLE`   | INGRESS      | base64-JSON: `{ip, port, password, sni, proto: hy2}`  |
+| `HY2_PORT`     | EGRESS+INGRESS | UDP-порт (по умолчанию 8443)                       |
+| `HY2_SNI`      | EGRESS+INGRESS | SNI для self-signed cert (по умолчанию www.bing.com)|
+| `HY2_PASSWORD` | INGRESS      | альтернатива бандлу                                   |
+| `HY2_EGRESS_IP`| INGRESS      | альтернатива бандлу                                   |
 
-Удобный приём: вставить ключи в `.env`-файл одной командой `cat > /tmp/wg.env`,
-закрыть EOF, потом `set -a; . /tmp/wg.env; set +a; sudo -E bash setup.sh`.
+### VLESS+Reality+Vision (одна переменная-бандл)
+
+| Переменная        | Кем читается | Что                                                                  |
+| ----------------- | ------------ | -------------------------------------------------------------------- |
+| `VLESS_BUNDLE`    | INGRESS      | base64-JSON: `{ip, port, uuid, pub, sid, sni, proto: vless}`         |
+| `VLESS_PORT`      | EGRESS+INGRESS | TCP-порт (по умолчанию 443)                                       |
+| `VLESS_DEST`      | EGRESS       | reality dest, host:port (по умолчанию www.cloudflare.com:443)        |
+| `VLESS_SNI`       | EGRESS+INGRESS | SNI на котором маскируемся (по умолчанию www.cloudflare.com)      |
+| `VLESS_UUID`      | INGRESS      | альтернатива бандлу                                                  |
+| `VLESS_PUBLIC_KEY`| INGRESS      | альтернатива бандлу                                                  |
+| `VLESS_SHORT_ID`  | INGRESS      | альтернатива бандлу                                                  |
+| `VLESS_EGRESS_IP` | INGRESS      | альтернатива бандлу                                                  |
+
+> Бандл (`HY2_BUNDLE` / `VLESS_BUNDLE`) — самый удобный путь: на egress
+> скрипт его сам выводит после генерации, на ingress подставил в одну
+> переменную и всё работает без прomptов.
 
 ## Diagnostics
 
@@ -319,6 +379,11 @@ bash tests/run-all.sh
 
 | Версия  | Дата       | Что                                                                |
 | ------- | ---------- | ------------------------------------------------------------------ |
+| 1.1.0   | 2026-05-03 | Поддержка двух новых протоколов: **Hysteria 2** (UDP/QUIC) и       |
+|         |            | **VLESS+Reality+Vision** (TCP/TLS, max stealth) на sing-box. На    |
+|         |            | старте setup.sh теперь меню выбора протокола. Egress→ingress       |
+|         |            | секреты передаются одним base64-блоком (`HY2_BUNDLE` /             |
+|         |            | `VLESS_BUNDLE`) — paste-ад исключен.                               |
 | 1.0.4   | 2026-05-03 | `read_tty` теперь читает из stdin когда тот сам по себе TTY (под   |
 |         |            | sudo), и только в `curl\|bash` режиме идёт через `/dev/tty`. Это    |
 |         |            | лечит случай провайдеров с двойным pty, где `/dev/tty` указывала   |

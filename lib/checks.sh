@@ -127,3 +127,11 @@ is_valid_iface() {
     local i="$1"
     [[ "$i" =~ ^[A-Za-z0-9._-]+$ ]] && [[ ${#i} -le 15 ]]
 }
+
+# is_valid_uuid <string>
+# UUIDv4 canonical form: 8-4-4-4-12 lowercase hex with dashes. We accept any
+# version (v4 is the convention but sing-box doesn't enforce).
+is_valid_uuid() {
+    local u="$1"
+    [[ "$u" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
+}
